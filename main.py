@@ -1,51 +1,48 @@
-import os
+from os.path import join, abspath
+from os import walk
 import re
 
-root_path_name = '@app'
-root_path = './src/app'
-sep = os.path.sep
+root_path = join('src', 'app')
 
 import_expression = re.compile(
-    'import\\s*{[^}]*}\\s*from\\s*(?:\'[^\']*\'|"[^"]*")\\s*;')
+    'import\\s*(?:{[^}]*}|\\*\\s+as\\s+\\w+\\s)\\s*from\\s*(?:\'[^\']*\'|"[^"]*")\\s*;')
 
 path_expression = re.compile('\'[^\']*\'|"[^"]*"')
 
+aliases = [
+    {'key': '@core', 'value': join('src', 'app', 'core')},
+    {'key': '@environment', 'value': join('src', 'environments', 'environment')}
+]
 
-def convert_path(path_array, match):
-    import_path = match.group(0)[1:-1].split(sep)
-    if not import_path or import_path[0] != ('..'):
+def convert_path(path, match):
+    import_path = match.group(0)[1:-1]
+    if not import_path.startswith('..'):
         return match.group(0)
-    while import_path and import_path[0] == ('..'):
-        path_array = path_array[0:-1]
-        import_path = import_path[1:]
-    if path_array and path_array[0] == ('.'):
-        path_array = path_array[1:]
-    q = match.group(0)[0]
-    if path_array:
-        path = os.path.join(q + root_path_name, os.path.join(*path_array))
-    else:
-        path = q + root_path_name
-    return os.path.join(path, os.path.join(*import_path) + q)
+    full_import_path = abspath(join(path, import_path))
+    for alias in aliases:
+        full_alias_path = abspath(alias['value'])
+        q = match.group(0)[0]
+        if full_import_path.startswith(full_alias_path):
+            return q + alias['key'] + full_import_path[len(full_alias_path):] + q
+    return match.group(0)
 
 
-def convert_import(path_array, match):
+def convert_import(path, match):
     return path_expression.sub(
-        lambda match: convert_path(path_array, match), match.group(0))
+        lambda match: convert_path(path, match), match.group(0))
 
 
 def convert(path, file):
-    path_array = path.split(sep)
-    with open(os.path.join(path, file)) as f:
+    with open(join(path, file)) as f:
         content = f.read()
 
-    with open(os.path.join(path, file), 'w') as f:
-        content = import_expression.sub(
-            lambda match: convert_import(path_array, match), content)
+    content = import_expression.sub(
+        lambda match: convert_import(path, match), content)
+    with open(join(path, file), 'w') as f:
         f.write(content)
 
 
-os.chdir(root_path)
-for root, dirs, files in os.walk('.'):
+for root, dirs, files in walk(root_path):
     for file in files:
         if file.endswith('.ts'):
             convert(root, file)
